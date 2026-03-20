@@ -1,8 +1,16 @@
 {
   "name": "reelsum",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "A powerful, minimalistic CLI tool to download, transcribe, and intelligently format speech from Instagram Reels using OpenAI Whisper and GPT.",
   "type": "module",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "keywords": [
     "instagram",
     "reel",
@@ -27,11 +35,12 @@
   },
   "homepage": "https://github.com/edwarddjss/reelsum#readme",
   "bin": {
-    "reelsum": "./dist/cli.js"
+    "reelsum": "dist/cli.js"
   },
   "scripts": {
     "build": "tsc",
-    "prepublishOnly": "npm run build"
+    "test": "npm run build && node --test test/*.test.mjs",
+    "prepublishOnly": "npm test"
   },
   "dependencies": {
     "@inquirer/prompts": "^8.3.2",

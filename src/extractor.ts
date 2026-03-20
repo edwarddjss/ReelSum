@@ -1,6 +1,8 @@
 import fs from 'fs';
 import OpenAI from 'openai';
 
+import { getErrorMessage } from './errors.js';
+
 /**
  * Transcribes the audio file using OpenAI's Whisper model.
  * 
@@ -23,7 +25,7 @@ export async function extractTranscript(audioPath: string): Promise<string> {
 
         // The response format text returns a string
         return (transcription as unknown as string).trim();
-    } catch (error: any) {
-        throw new Error(`OpenAI transcription failed: ${error.message}`);
+    } catch (error) {
+        throw new Error(`OpenAI transcription failed: ${getErrorMessage(error)}`);
     }
 }

@@ -1,14 +1,16 @@
 import OpenAI from 'openai';
 
+import { getErrorMessage } from './errors.js';
+
 /**
  * Cleans up and formats the transcript using OpenAI's GPT-4o model.
  * 
  * @param transcript The raw text output from Whisper.
  * @returns A clean, highly readable, and coherent version of the transcript.
  */
-export async function generateSummary(transcript: string): Promise<string> {
+export async function formatTranscript(transcript: string): Promise<string> {
     if (!transcript || !transcript.trim()) {
-        return "No transcript could be extracted.";
+        return 'No transcript could be extracted.';
     }
 
     const openai = new OpenAI(); // Automatically uses process.env.OPENAI_API_KEY
@@ -39,8 +41,8 @@ Cleaned Transcript:
             max_tokens: 600
         });
 
-        return response.choices[0]?.message?.content?.trim() || "Failed to generate clean transcript.";
-    } catch (error: any) {
-        throw new Error(`OpenAI generation failed: ${error.message}`);
+        return response.choices[0]?.message?.content?.trim() || 'Failed to generate clean transcript.';
+    } catch (error) {
+        throw new Error(`OpenAI generation failed: ${getErrorMessage(error)}`);
     }
 }
