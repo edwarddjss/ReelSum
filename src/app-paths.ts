@@ -12,6 +12,7 @@ export type AppPaths = {
     configFile: string;
     legacyConfigFile: string;
     outputDir: string;
+    stateFile: string;
 };
 
 export function getAppPaths(homeDir: string = os.homedir()): AppPaths {
@@ -21,6 +22,7 @@ export function getAppPaths(homeDir: string = os.homedir()): AppPaths {
         appDir,
         configFile: path.join(appDir, CONFIG_FILE_NAME),
         legacyConfigFile: path.join(homeDir, LEGACY_CONFIG_FILE_NAME),
-        outputDir: path.join(appDir, OUTPUT_DIR_NAME)
+        outputDir: path.join(appDir, OUTPUT_DIR_NAME),
+        stateFile: path.join(appDir, 'state.json')
     };
 }

@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-import boxen from 'boxen';
 import chalk from 'chalk';
 import { Command } from 'commander';
 import ora from 'ora';
@@ -15,14 +14,17 @@ import { extractTranscript } from './extractor.js';
 import { openHistoryBrowser } from './history.js';
 import { getPackageVersion } from './package-info.js';
 import { promptForApiKey, promptForInstagramUrl, promptForNextAction, type NextAction } from './prompts.js';
+import { renderOutputBox } from './output-box.js';
 import { saveOutput } from './storage.js';
 import { createTempWorkspace } from './temp-workspace.js';
+import { formatNotice, palette, renderBrandHeader } from './ui.js';
+import { maybeHandleCliUpdate } from './updater.js';
 import { assertInstagramUrl } from './validation.js';
 
 const paths = getAppPaths();
 
 function exitGracefully() {
-    console.log(chalk.dim('\nGoodbye! 👋\n'));
+    console.log(`\n${formatNotice('info', 'Goodbye.')}\n`);
     process.exit(0);
 }
 
@@ -31,7 +33,7 @@ function handleFatalError(error: unknown): never {
         exitGracefully();
     }
 
-    console.error('\n' + chalk.red(`An unexpected error occurred: ${getErrorMessage(error)}`));
+    console.error('\n' + formatNotice('danger', `An unexpected error occurred: ${getErrorMessage(error)}`));
     process.exit(1);
 }
 
@@ -52,9 +54,9 @@ async function ensureApiKey() {
         return existingApiKey;
     }
 
-    console.log(chalk.yellow('🔑 Setup Required'));
-    console.log(chalk.dim('Your OpenAI API key is missing. This is a one-time local setup.'));
-    console.log(chalk.dim(`It will be stored locally in ${paths.configFile} with restricted permissions where supported.\n`));
+    console.log(formatNotice('accent', 'API key required'));
+    console.log(palette.muted('Your OpenAI API key is missing. This is a one-time local setup.'));
+    console.log(palette.muted('It will be stored locally on this device.\n'));
 
     const apiKey = (await promptForApiKey()).trim();
     if (!apiKey) {
@@ -63,7 +65,7 @@ async function ensureApiKey() {
 
     saveConfig({ OPENAI_API_KEY: apiKey }, paths);
     process.env.OPENAI_API_KEY = apiKey;
-    console.log(chalk.green(`✔ API Key saved to ${paths.configFile}.\n`));
+    console.log(`${formatNotice('success', 'API key saved.')}\n`);
 
     return apiKey;
 }
@@ -72,10 +74,10 @@ async function configureApiKey(optionKey?: string) {
     let apiKey = optionKey?.trim();
 
     if (apiKey) {
-        console.log(chalk.yellow('Warning: passing API keys as command flags can expose them in shell history.'));
+        console.log(formatNotice('warning', 'Passing API keys as command flags can expose them in shell history.'));
     } else {
-        console.log(chalk.yellow('🔑 OpenAI API Key Setup'));
-        console.log(chalk.dim(`The key will be stored locally in ${paths.configFile} with restricted permissions where supported.\n`));
+        console.log(formatNotice('accent', 'Set up your API key'));
+        console.log(palette.muted('The key will be stored locally on this device.\n'));
         apiKey = (await promptForApiKey()).trim();
     }
 
@@ -84,7 +86,7 @@ async function configureApiKey(optionKey?: string) {
     }
 
     saveConfig({ OPENAI_API_KEY: apiKey }, paths);
-    console.log(chalk.green(`\n✔ Configuration saved to ${paths.configFile}`));
+    console.log(`\n${formatNotice('success', 'API key saved.')}`);
 }
 
 async function processReel(url: string) {
@@ -92,51 +94,44 @@ async function processReel(url: string) {
     const spinner = ora({ color: 'magenta' });
 
     try {
-        spinner.start(chalk.blue('Downloading Reel and extracting audio...'));
+        spinner.start(palette.info('Downloading Reel and extracting audio...'));
         const audioPath = await downloadAudio(url, tempWorkspace.dirPath);
-        spinner.succeed(chalk.green('Download complete.'));
+        spinner.succeed(palette.success('Download complete.'));
 
-        spinner.start(chalk.blue('Transcribing audio with Whisper...'));
+        spinner.start(palette.info('Transcribing audio...'));
         const transcript = await extractTranscript(audioPath);
-        spinner.succeed(chalk.green('Transcription complete.'));
+        spinner.succeed(palette.success('Transcription complete.'));
 
-        spinner.start(chalk.blue('Cleaning and formatting transcript...'));
+        spinner.start(palette.info('Formatting transcript...'));
         const formattedTranscript = await formatTranscript(transcript);
-        spinner.succeed(chalk.green('Processing complete.'));
+        spinner.succeed(palette.success('Processing complete.'));
 
         console.log('');
 
         let savedPath: string | undefined;
         try {
             savedPath = saveOutput(url, formattedTranscript, paths);
-            console.log(chalk.green(`✔ Saved output to ${savedPath}`));
-        } catch (error) {
-            console.log(chalk.yellow(`⚠ Output could not be saved locally: ${getErrorMessage(error)}`));
+            console.log(formatNotice('success', 'Added to history.'));
+        } catch {
+            console.log(formatNotice('warning', 'Could not add this to history.'));
         }
 
         const clipboardResult = copyTextToClipboard(formattedTranscript);
         if (clipboardResult.copied) {
-            console.log(chalk.green('✔ Copied to clipboard!\n'));
+            console.log(`${formatNotice('success', 'Copied to clipboard!')}\n`);
         } else {
-            console.log(chalk.yellow(`⚠ Clipboard unavailable: ${clipboardResult.error}\n`));
+            console.log(`${formatNotice('warning', 'Could not copy to clipboard.')}\n`);
         }
 
-        console.log(boxen(formattedTranscript, {
-            title: 'Reel Content',
-            titleAlignment: 'left',
-            padding: 1,
-            margin: 1,
-            borderColor: 'magenta',
-            borderStyle: 'round'
-        }));
+        console.log(renderOutputBox(formattedTranscript, { margin: 1 }));
 
         return savedPath;
     } catch (error) {
         if (spinner.isSpinning) {
-            spinner.fail(chalk.red('Operation failed.'));
+            spinner.fail(palette.danger('Operation failed.'));
         }
 
-        console.error('\n' + chalk.red(`An error occurred: ${getErrorMessage(error)}`));
+        console.error('\n' + formatNotice('danger', `An error occurred: ${getErrorMessage(error)}`));
         return undefined;
     } finally {
         tempWorkspace.cleanup();
@@ -146,11 +141,15 @@ async function processReel(url: string) {
 async function runSummarize(url?: string) {
     let finalUrl = url?.trim();
 
+    if (await maybeHandleCliUpdate(paths)) {
+        return;
+    }
+
     if (finalUrl) {
         finalUrl = assertInstagramUrl(finalUrl);
     } else if (process.stdout.isTTY) {
         console.clear();
-        console.log(chalk.magenta.bold('\n✨ ReelSum\n'));
+        console.log(`\n${renderBrandHeader()}\n`);
     }
 
     await ensureApiKey();
@@ -203,6 +202,10 @@ program
     .option('-k, --key <string>', 'Your OpenAI API key')
     .action(async (options: { key?: string }) => {
         try {
+            if (await maybeHandleCliUpdate(paths)) {
+                return;
+            }
+
             await configureApiKey(options.key);
         } catch (error) {
             handleFatalError(error);
@@ -215,6 +218,10 @@ program
     .option('-n, --limit <number>', 'Number of saved outputs to load', `${DEFAULT_HISTORY_LIMIT}`)
     .action(async (options: { limit: string }) => {
         try {
+            if (await maybeHandleCliUpdate(paths)) {
+                return;
+            }
+
             await openHistoryBrowser(parseLimit(options.limit), paths);
         } catch (error) {
             handleFatalError(error);

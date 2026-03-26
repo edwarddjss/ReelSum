@@ -7,12 +7,13 @@ ReelSum is a beautifully simple CLI tool that turns any Instagram Reel into clea
 Just pass a link, and ReelSum will accurately transcribe the audio and intelligently structure the content into perfect, readable paragraphs, making it effortless to save, read, or share the information you care about.
 
 ### Features
-- ✨ **Zero-friction TUI**: Interactive, single-command onboarding.
-- 📋 **Auto-Copy**: Final text is instantly copied to your system clipboard.
-- 💾 **Auto-Save**: Every generated result is saved to `~/.reelsum/outputs/`.
-- 🕘 **History Browser**: Run `reelsum history` to browse, preview, and copy saved outputs.
-- 🔄 **Continuous Flow**: Process multiple reels back-to-back without restarting.
-- 🔒 **Local-First Config**: Your OpenAI API key can live in `~/.reelsum/config.json`, with restricted file permissions where supported.
+-  **Zero-friction TUI**: Interactive, single-command onboarding.
+-  **Auto-Copy**: Final text is instantly copied to your system clipboard.
+-  **Auto-Save**: Every generated result is saved to `~/.reelsum/outputs/`.
+-  **History Browser**: Run `reelsum history` to browse, preview, and copy saved outputs.
+-  **Continuous Flow**: Process multiple reels back-to-back without restarting.
+- ⬆ **Update Prompt**: When a newer npm version is available, ReelSum can prompt you to update with a single `Y` or `N` keypress.
+-  **Local-First Config**: Your OpenAI API key can live in `~/.reelsum/config.json`, with restricted file permissions where supported.
 
 ## Installation
 
@@ -40,6 +41,10 @@ When processing reels interactively, the final prompt reacts immediately to `Y`,
 - `Y` processes another reel
 - `H` opens your saved history browser
 - `N` exits
+
+If a newer version of ReelSum is published on npm, the CLI can also prompt you at startup to update immediately:
+- `Y` runs `npm install -g reelsum@latest`
+- `N` skips the update for now
 
 ---
 

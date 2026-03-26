@@ -3,6 +3,9 @@ import chalk from 'chalk';
 import { type AppPaths, getAppPaths } from './app-paths.js';
 import { copyTextToClipboard } from './clipboard.js';
 import { createExitPromptError } from './errors.js';
+import { icons } from './icons.js';
+import { getOutputBoxContentWidth, OUTPUT_BOX_VERTICAL_OVERHEAD, renderOutputBox } from './output-box.js';
+import { formatHeader, palette } from './ui.js';
 import {
     formatSavedAt,
     formatSavedAtCompact,
@@ -12,6 +15,16 @@ import {
 } from './storage.js';
 
 type HistoryBrowserMode = 'list' | 'view';
+type TerminalSize = {
+    columns: number;
+    rows: number;
+};
+type FooterSegment = {
+    text: string;
+    style: (text: string) => string;
+};
+
+const FOOTER_HEIGHT = 2;
 
 function truncateText(text: string, width: number) {
     const safeWidth = Math.max(4, width);
@@ -79,12 +92,10 @@ function wrapText(text: string, width: number) {
 }
 
 function printHistoryList(entries: SavedOutputEntry[]) {
-    console.log(chalk.magenta.bold(`\nSaved Reel Outputs (${entries.length})\n`));
+    console.log(`${chalk.magenta.bold(`\n${formatHeader(`Saved Reel Outputs (${entries.length})`)}\n`)}`);
 
     entries.forEach((entry, index) => {
         console.log(chalk.magenta(`${index + 1}.`) + ' ' + chalk.white(`${formatSavedAt(entry.savedAt)} | ${getEntryTitle(entry)}`));
-        console.log(chalk.dim(entry.sourceUrl));
-        console.log(chalk.dim(entry.filePath));
 
         if (entry.preview) {
             console.log(chalk.white(entry.preview));
@@ -94,75 +105,187 @@ function printHistoryList(entries: SavedOutputEntry[]) {
     });
 }
 
-function renderHistoryList(entries: SavedOutputEntry[], selectedIndex: number, statusMessage: string, paths: AppPaths) {
-    const cols = process.stdout.columns || 80;
-    const rows = process.stdout.rows || 24;
+function formatStatusLine(statusMessage: string, fallbackMessage: string, width: number) {
+    const message = truncateText(statusMessage || fallbackMessage, width);
+
+    if (!statusMessage) {
+        return chalk.dim(message);
+    }
+
+    if (statusMessage.startsWith('Copied')) {
+        return chalk.green(message);
+    }
+
+    if (statusMessage.startsWith('Copy failed')) {
+        return chalk.yellow(message);
+    }
+
+    return chalk.cyan(message);
+}
+
+function renderFooterLine(segments: FooterSegment[], width: number) {
+    const plainText = segments.map((segment) => segment.text).join('');
+    const padding = Math.max(0, width - plainText.length);
+
+    return `${' '.repeat(padding)}${segments.map((segment) => segment.style(segment.text)).join('')}`;
+}
+
+function getFooterControls(mode: HistoryBrowserMode, width: number) {
+    const compact = width < 54;
+
+    if (mode === 'list') {
+        return renderFooterLine(compact
+            ? [
+                { text: 'Up/Down', style: chalk.cyan.dim },
+                { text: '  ', style: chalk.dim },
+                { text: 'Enter', style: chalk.cyan.dim },
+                { text: '  ', style: chalk.dim },
+                { text: 'C', style: chalk.cyan.dim },
+                { text: '  ', style: chalk.dim },
+                { text: 'Q', style: chalk.cyan.dim }
+            ]
+            : [
+                { text: 'Up/Down', style: chalk.cyan.dim },
+                { text: ' move  ', style: chalk.dim },
+                { text: 'Enter', style: chalk.cyan.dim },
+                { text: ' open  ', style: chalk.dim },
+                { text: 'C', style: chalk.cyan.dim },
+                { text: ' copy  ', style: chalk.dim },
+                { text: 'Q', style: chalk.cyan.dim },
+                { text: ' quit', style: chalk.dim }
+            ], width);
+    }
+
+    return renderFooterLine(compact
+        ? [
+            { text: 'Up/Down', style: chalk.cyan.dim },
+            { text: '  ', style: chalk.dim },
+            { text: 'C', style: chalk.cyan.dim },
+            { text: '  ', style: chalk.dim },
+            { text: 'Esc', style: chalk.cyan.dim },
+            { text: '  ', style: chalk.dim },
+            { text: 'Q', style: chalk.cyan.dim }
+        ]
+        : [
+            { text: 'Up/Down', style: chalk.cyan.dim },
+            { text: ' scroll  ', style: chalk.dim },
+            { text: 'C', style: chalk.cyan.dim },
+            { text: ' copy  ', style: chalk.dim },
+            { text: 'Esc', style: chalk.cyan.dim },
+            { text: ' back  ', style: chalk.dim },
+            { text: 'Q', style: chalk.cyan.dim },
+            { text: ' quit', style: chalk.dim }
+        ], width);
+}
+
+function renderScreen(contentLines: string[], footerLines: string[], rows: number) {
+    const contentHeight = Math.max(0, rows - footerLines.length);
+    const visibleContent = contentLines.slice(0, contentHeight);
+    const blankLines = Array.from({ length: Math.max(0, contentHeight - visibleContent.length) }, () => '');
+
+    return [...visibleContent, ...blankLines, ...footerLines].join('\n');
+}
+
+export function renderHistoryList(
+    entries: SavedOutputEntry[],
+    selectedIndex: number,
+    statusMessage: string,
+    terminalSize: TerminalSize = getTerminalSize()
+) {
+    const cols = terminalSize.columns || 80;
+    const rows = terminalSize.rows || 24;
+    const bodyRows = Math.max(1, rows - FOOTER_HEIGHT);
     const contentWidth = Math.max(20, cols - 2);
-    const previewHeight = Math.max(5, Math.floor(rows / 3));
-    const listHeight = Math.max(3, rows - previewHeight - 8);
+    const previewHeight = Math.max(5, Math.floor(bodyRows / 3));
+    const listHeight = Math.max(3, bodyRows - previewHeight - 8);
     const maxStart = Math.max(0, entries.length - listHeight);
     const start = Math.max(0, Math.min(selectedIndex - Math.floor(listHeight / 2), maxStart));
     const end = Math.min(entries.length, start + listHeight);
     const selectedEntry = entries[selectedIndex];
     const lines: string[] = [];
 
-    lines.push(chalk.magenta.bold('Reel History'));
-    lines.push(chalk.dim('Up/Down or J/K: move  Enter: view  C: copy  Q: exit'));
-    lines.push(statusMessage || chalk.dim(`Showing ${entries.length} saved outputs from ${paths.outputDir}`));
+    lines.push(formatHeader('Reel History'));
+    lines.push(palette.muted(`${entries.length} saved output${entries.length === 1 ? '' : 's'}`));
     lines.push('');
 
     for (let index = start; index < end; index += 1) {
         const entry = entries[index];
-        const prefix = index === selectedIndex ? chalk.magenta('>') : ' ';
+        const prefix = index === selectedIndex ? chalk.magenta(icons.selected) : ' ';
         const line = `${index + 1}. ${formatSavedAtCompact(entry.savedAt)} | ${getEntryTitle(entry)}`;
         const formatter = index === selectedIndex ? chalk.bold.white : chalk.white;
         lines.push(`${prefix} ${formatter(truncateText(line, contentWidth))}`);
     }
 
-    if (entries.length > listHeight) {
-        lines.push(chalk.dim(`Showing ${start + 1}-${end} of ${entries.length}`));
-    }
-
     lines.push('');
-    lines.push(chalk.magenta('Selected'));
+    lines.push(palette.accent('Selected'));
     lines.push(chalk.white(truncateText(`${formatSavedAt(selectedEntry.savedAt)} | ${getEntryTitle(selectedEntry)}`, contentWidth)));
-    lines.push(chalk.dim(truncateText(selectedEntry.sourceUrl, contentWidth)));
-    lines.push(chalk.dim(truncateText(selectedEntry.filePath, contentWidth)));
 
     const previewLines = wrapText(selectedEntry.preview || '[No saved text preview available.]', contentWidth)
-        .slice(0, Math.max(2, rows - lines.length - 1));
+        .slice(0, Math.max(2, bodyRows - lines.length));
     lines.push(...previewLines.map((line) => chalk.white(line)));
 
-    return lines.slice(0, rows).join('\n');
+    return renderScreen(lines, [
+        formatStatusLine(
+            statusMessage,
+            entries.length > listHeight
+                ? `Showing ${start + 1}-${end} of ${entries.length}`
+                : `Entry ${selectedIndex + 1} of ${entries.length}`,
+            contentWidth
+        ),
+        getFooterControls('list', contentWidth)
+    ], rows);
 }
 
-function renderHistoryView(entries: SavedOutputEntry[], selectedIndex: number, scrollOffset: number, statusMessage: string) {
+function getTerminalSize(): TerminalSize {
+    return {
+        columns: process.stdout.columns || 80,
+        rows: process.stdout.rows || 24
+    };
+}
+
+export function renderHistoryView(
+    entries: SavedOutputEntry[],
+    selectedIndex: number,
+    scrollOffset: number,
+    statusMessage: string,
+    terminalSize: TerminalSize = getTerminalSize()
+) {
     const entry = entries[selectedIndex];
-    const cols = process.stdout.columns || 80;
-    const rows = process.stdout.rows || 24;
+    const cols = terminalSize.columns || 80;
+    const rows = terminalSize.rows || 24;
+    const bodyRows = Math.max(1, rows - FOOTER_HEIGHT);
     const contentWidth = Math.max(20, cols - 2);
     const lines: string[] = [];
-    const wrappedBody = wrapText(entry.body || '[No saved text found.]', contentWidth);
 
-    lines.push(chalk.magenta.bold(`Saved Output ${selectedIndex + 1}/${entries.length}`));
-    lines.push(chalk.dim('Up/Down or J/K: scroll  B: back  C: copy  Q: exit'));
-    lines.push(statusMessage || chalk.dim(getEntryTitle(entry)));
+    lines.push(formatHeader(getEntryTitle(entry)));
+    lines.push(palette.muted(`${selectedIndex + 1} of ${entries.length}`));
     lines.push('');
-    lines.push(chalk.white(truncateText(`Saved: ${formatSavedAt(entry.savedAt)}`, contentWidth)));
-    lines.push(chalk.dim(truncateText(entry.sourceUrl, contentWidth)));
-    lines.push(chalk.dim(truncateText(entry.filePath, contentWidth)));
+    lines.push(chalk.white(truncateText(`Saved ${formatSavedAt(entry.savedAt)}`, contentWidth)));
     lines.push('');
 
-    const bodyHeight = Math.max(3, rows - lines.length - 1);
-    const maxScroll = Math.max(0, wrappedBody.length - bodyHeight);
+    const boxHeight = Math.max(5, bodyRows - lines.length);
+    const visibleBodyLineCount = Math.max(1, boxHeight - OUTPUT_BOX_VERTICAL_OVERHEAD);
+    const wrappedBody = wrapText(entry.body || '[No saved text found.]', getOutputBoxContentWidth(cols));
+    const maxScroll = Math.max(0, wrappedBody.length - visibleBodyLineCount);
     const clampedScrollOffset = Math.max(0, Math.min(scrollOffset, maxScroll));
-    const visibleBody = wrappedBody.slice(clampedScrollOffset, clampedScrollOffset + bodyHeight);
+    const visibleBody = wrappedBody.slice(clampedScrollOffset, clampedScrollOffset + visibleBodyLineCount);
+    const boxedBody = renderOutputBox(visibleBody.join('\n'), {
+        margin: 0,
+        width: cols,
+        height: boxHeight
+    });
 
-    lines.push(...visibleBody.map((line) => chalk.white(line)));
-    lines.push(chalk.dim(`Lines ${clampedScrollOffset + 1}-${Math.min(clampedScrollOffset + bodyHeight, wrappedBody.length)} of ${wrappedBody.length}`));
+    lines.push(...boxedBody.split('\n'));
 
     return {
-        output: lines.slice(0, rows).join('\n'),
+        output: renderScreen(lines, [
+            formatStatusLine(
+                statusMessage,
+                `Lines ${clampedScrollOffset + 1}-${Math.min(clampedScrollOffset + visibleBodyLineCount, wrappedBody.length)} of ${wrappedBody.length}`,
+                contentWidth
+            ),
+            getFooterControls('view', contentWidth)
+        ], rows),
         scrollOffset: clampedScrollOffset
     };
 }
@@ -171,8 +294,8 @@ export async function openHistoryBrowser(limit: number, paths: AppPaths = getApp
     const entries = getSavedOutputs(limit, paths);
 
     if (entries.length === 0) {
-        console.log(chalk.yellow(`\nNo saved outputs found in ${paths.outputDir}`));
-        console.log(chalk.dim('Run reelsum to create your first saved output.\n'));
+        console.log(chalk.yellow('\nNo saved outputs found.'));
+        console.log(chalk.dim('Run reelsum to save your first transcript.\n'));
         return;
     }
 
@@ -220,7 +343,7 @@ export async function openHistoryBrowser(limit: number, paths: AppPaths = getApp
             stdout.write('\x1b[2J\x1b[H');
 
             if (mode === 'list') {
-                stdout.write(renderHistoryList(entries, selectedIndex, statusMessage, paths));
+                stdout.write(renderHistoryList(entries, selectedIndex, statusMessage));
                 return;
             }
 
